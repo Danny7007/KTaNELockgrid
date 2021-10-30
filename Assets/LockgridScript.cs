@@ -35,7 +35,9 @@ public class LockgridScript : MonoBehaviour {
     private ArrowDir[] dispGrid = new ArrowDir[16];
     private int[] queues = Enumerable.Repeat(0, 16).ToArray();
     int prevPress = -1;
-    private bool resetting; 
+    private bool resetting;
+
+    List<int> generationPresses;
 
     static int moduleIdCounter = 1;
     int moduleId;
@@ -54,31 +56,62 @@ public class LockgridScript : MonoBehaviour {
 
     void Start ()
     {
+        GeneratePuzzle();
         for (int i = 0; i < 16; i++)
         {
-            ArrowDir dir = (ArrowDir)Rnd.Range(0, 4);
-            initGrid[i] = dir;
-            dispGrid[i] = dir;
-            arrowTFs[i].localEulerAngles = GetVector(dir);
+            dispGrid[i] = initGrid[i];
+            arrowTFs[i].localEulerAngles = GetVector(initGrid[i]);
         }
         Ut.LogIntegerGrid("Lockgrid", moduleId, dispGrid.Cast<int>().ToArray(), 4, 4, "↑→↓←".ToCharArray());
+        Log("One solution to the puzzle is: {0}.", generationPresses.Select(x => coords[x]).Join(", "));
     }
+    void GeneratePuzzle()
+    {
+        Restart:
+        List<int> presses = new List<int>();
+        bool[] pressed = new bool[16];
+        do
+        {
+            for (int i = 0; i < 16; i++)
+                initGrid[i] = (ArrowDir)Rnd.Range(0, 4);
+            if (AnySelfPoints(initGrid))
+                goto Restart;
+            int[] safe = Enumerable.Range(0, 16).Where(x => IsSafe(x, initGrid)).ToArray();
+            int[] safeAndUntouched = safe.Where(x => !pressed[x]).ToArray();
+            int taken;
+            if (safe.Length == 0)
+                goto Restart;
+            if (safeAndUntouched.Length != 0)
+                taken = safeAndUntouched.PickRandom();
+            else taken = safe.PickRandom();
+            presses.Add(taken);
+            RotateValue(initGrid, taken, -1);
 
+        } while (pressed.Any(x => !x));
+        generationPresses = presses.Reverse<int>().ToList();
+    }
+    bool AnySelfPoints(ArrowDir[] grid)
+    {
+        return Enumerable.Range(0, 16).Any(pos =>
+        {
+            int pointed = GetPointed(pos, grid[pos]);
+            return pointed != -1 && GetPointed(pointed, grid[pointed]) == pos; //shortcuts 2 arrows pointing at themselves case.
+        });
+    }
     void Press(int ix)
     {
         if (moduleSolved || resetting)
             return;
-        //if (prevPress == ix)
-        if (false)
+        if (prevPress == ix)
         {
             Log("Tried to press the same arrow twice in a row ({0}). Strike!!!!!!!", coords[ix]);
             Module.HandleStrike();
         }
-        else if (!GetAdjacents(ix).Any(adj => GetPointed(adj, dispGrid[adj]) == ix))
+        else if (IsSafe(ix, dispGrid))
         {
             pressed[ix] = true;
             rings[ix].material = lit;
-            RotateValue(dispGrid, ix);
+            RotateValue(dispGrid, ix, 1);
             prevPress = ix;
             Log("Rotated arrow {0} to position {1}.", coords[ix], dispGrid[ix].ToString());
             queues[ix]++;
@@ -93,6 +126,10 @@ public class LockgridScript : MonoBehaviour {
                 coords[ix], coords[GetAdjacents(ix).First(adj => GetPointed(adj, dispGrid[adj]) == ix)]);
             Module.HandleStrike();
         }
+    }
+    bool IsSafe(int ix, ArrowDir[] usedGrid)
+    {
+        return !GetAdjacents(ix).Any(adj => GetPointed(adj, usedGrid[adj]) == ix);
     }
     IEnumerator Reset()
     {
@@ -113,9 +150,9 @@ public class LockgridScript : MonoBehaviour {
         resetting = false;
     }
 
-    void RotateValue(ArrowDir[] grid, int ix)
+    void RotateValue(ArrowDir[] grid, int ix, int amount)
     {
-        grid[ix] = (ArrowDir)(((int)grid[ix] + 1) % 4);
+        grid[ix] = (ArrowDir) ((((int)grid[ix] + amount) % 4 + 4) % 4);
     }
     int[] GetAdjacents(int pos)
     {
